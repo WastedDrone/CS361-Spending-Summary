@@ -1,0 +1,186 @@
+import zmq
+import json
+import os
+
+PORT = 5559
+DATA_FILE = "spending_data.json"
+
+#find the data
+def load_data():
+    #no file yet means nothing has been saved.
+    if not os.path.exists(DATA_FILE):
+        return {}
+    with open(DATA_FILE, "r") as file:
+        return json.load(file)
+
+def save_data(data):
+    with open(DATA_FILE, "w") as file:
+        json.dump(data,file, indent=4)
+
+def error():
+    return  {
+        "status": "error",
+        "message": "Action does not work."
+    }
+
+
+def calculate_total_spending(data, app, expenses):
+    #If we don't have spending info in our data,
+    if app not in data:
+        data[app] = {"next_id": 1, "spending": []}
+    total = round(sum(item["amount"] for item in expenses), 2)
+
+    #keep a counter so deleted spending report don't resue old id's
+    spending_id = data[app]["next_id"]
+    record = {
+        "id":spending_id,
+        "expenses": expenses,
+        "total": total
+    }
+    data[app]["spending"].append(record)
+    data[app]["next_id"] +=1
+    save_data(data)
+
+    return {
+        "status": "success",
+        "id": spending_id,
+        "total": total,
+        "message": "Total spending calculated"
+    }
+
+def calculate_average_spending(data, app, expenses):
+    if app not in data:
+        data[app] = {"next_id": 1, "spending": []}
+
+    average = round(sum(item["amount"] for item in expenses) / len(expenses), 2)
+
+    spending_id = data[app]["next_id"]
+    record = {
+        "id": spending_id,
+        "expenses": expenses,
+        "average": average
+    }
+
+    data[app]["spending"].append(record)
+    data[app]["next_id"] += 1
+    save_data(data)
+
+    return {
+      "status": "success",
+        "id": spending_id,
+        "average": average,
+        "message": "Average was calculated"
+
+    }
+
+def calculate_category_spending(data, app, expenses):
+    if app not in data:
+        data[app] = {"next_id": 1, "spending": []}
+
+    category_total = {}
+
+    for item in expenses:
+        cat = item["category"].strip().lower()
+        amt = item["amount"]
+
+        if cat not in category_total:
+            category_total[cat] = round(amt, 2)
+        else:
+            category_total[cat] = round(category_total[cat] + amt, 2)
+
+    spending_id = data[app]["next_id"]
+    record = {
+        "id": spending_id,
+        "expenses": expenses,
+        "category_total": category_total
+    }
+
+    data[app]["spending"].append(record)
+    data[app]["next_id"] += 1
+    save_data(data)
+
+    return {
+        "status": "success",
+        "id": spending_id,
+        "category_total": category_total,
+        "message": "Category total was calculated"
+    }
+
+def handle_request(message):
+    try:
+        request = json.loads(message)
+    except json.JSONDecodeError:
+        return {
+            "status": "error",
+            "message": "Invalid JSON"
+        }
+
+    if not isinstance(request, dict):
+        return {
+            "status": "error",
+            "message": "Request must be a dictionary"
+        }
+
+    action = request.get("action")
+    app = request.get("app")
+    expenses = request.get("expenses")
+
+    if not isinstance(app,str) or not app.strip():
+        return {
+            "status": "error",
+            "message": "App must be a valid string"
+        }
+    if not isinstance(expenses,list):
+        return {
+            "status": "error",
+            "message": "Expenses must be a list"
+        }
+    if not expenses:
+        return {"status": "error",
+                "message": "please enter expense list"}
+
+    for item in expenses:
+        if not isinstance(item, dict):
+            return {
+                "status": "error",
+                "message": "Each expense must be a dictionary"
+            }
+        if not isinstance(item.get("category"), str) or not item["category"].strip():
+            return {
+                "status": "error",
+                "message": "Category must be a valid string"
+            }
+        amount = item.get("amount")
+        if type(amount) not in (int, float) or not (0 < amount < float("inf")):
+            return {
+                "status": "error",
+                "message": "Amount must be positive number"
+            }
+    data = load_data()
+
+    if action == "total":
+        return calculate_total_spending(data, app, expenses)
+    elif action == "average":
+       return calculate_average_spending(data, app, expenses)
+    elif action == "category_total":
+        return calculate_category_spending(data, app, expenses)
+    else:
+       return error()
+
+def main():
+    context = zmq.Context()
+    socket = context.socket(zmq.REP)
+    socket.bind(f"tcp://*:{PORT}")
+    print(f"Spending Summary microservice is running on port {PORT}")
+
+    while True:
+        message = socket.recv_string()
+        print("Received request")
+
+        reply = json.dumps(handle_request(message))
+        socket.send_string(reply)
+        print("Reply sent")
+
+
+if __name__ == "__main__":
+    main()
