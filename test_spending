@@ -1,0 +1,82 @@
+import zmq
+import json
+
+APP = "test_program"
+
+def send_request(socket,request):
+    print("Request sent:",json.dumps(request))
+    socket.send_string(json.dumps(request))
+
+    reply = json.loads(socket.recv_string())
+    print("Reply received:", json.dumps(reply))
+    print()
+
+def main():
+    context = zmq.Context()
+    socket = context.socket(zmq.REQ)
+    socket.connect("tcp://localhost:5559")
+    print("Connected to spending summary microservice")
+
+    expenses = [
+        {"category": "Food", "amount": 20},
+        {"category": "Gas", "amount": 50},
+        {"category": "Food", "amount": 100}
+    ]
+
+    #test 1 total
+    print("Test 1: Calculate total")
+    send_request(socket,{
+        "action": "total",
+        "app": APP,
+        "expenses":expenses
+    })
+    #test 2 average
+    print("Test 2: Calculate Average")
+    send_request(socket, {
+        "action": "average",
+        "app": APP,
+        "expenses": expenses
+    })
+    #test 3 category total
+    print("Test 3: Calculate category_total")
+    send_request(socket, {
+        "action": "category_total",
+        "app": APP,
+        "expenses": expenses
+    })
+    # test 4 A) invalid input
+    expenses = [
+        {"category": "Food", "amount": 20},
+        {"category": "Gas", "amount": -30},
+        {"category": "Food", "amount": 100}
+    ]
+
+    print("Test 4, A): Calculate total with negative input")
+    send_request(socket, {
+        "action": "total",
+        "app": APP,
+        "expenses": expenses
+    })
+    # test 4 B) invalid input
+    expenses = [
+        {"category": "Food", "amount": "gas"},
+        {"category": "Gas", "amount": 30},
+        {"category": "Food", "amount": 100}
+    ]
+    print("Test 4, B): Calculate total with non numerical value for amount")
+    send_request(socket, {
+        "action": "total",
+        "app": APP,
+        "expenses": expenses
+    })
+
+    #test 5 empty list
+    expenses = []
+    print("Test 5: Calculate total with empty list")
+    send_request(socket, {
+        "action": "total",
+        "app": APP,
+        "expenses": expenses
+    })
+if __name__ == "__main__":
+    main()
